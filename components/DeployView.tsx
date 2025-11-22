@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { AppSettings } from '../types';
-import { Copy, Server, Terminal, Globe, AlertTriangle, Package, Rocket, FileJson } from 'lucide-react';
+import { Copy, Server, Terminal, Globe, AlertTriangle, Package, Rocket, FileJson, Check } from 'lucide-react';
 
 interface DeployViewProps {
   settings: AppSettings;
@@ -9,6 +9,7 @@ interface DeployViewProps {
 
 const DeployView: React.FC<DeployViewProps> = ({ settings }) => {
   const [activeTab, setActiveTab] = useState<'server' | 'package'>('server');
+  const [copiedField, setCopiedField] = useState<string | null>(null);
 
   const nodeCode = `
 // server.js
@@ -44,6 +45,9 @@ const MODEL_NAME = process.env.MODEL_NAME || "${settings.modelName}";
 // --- 2. EXPRESS SERVER SETUP ---
 const app = express();
 
+// Important for Render/Heroku to detect HTTPS correctly
+app.set('trust proxy', true); 
+
 // Serve static files from the React frontend build directory
 app.use(express.static(path.join(__dirname, 'dist')));
 
@@ -51,6 +55,34 @@ app.use(cors());
 app.use(express.json());
 
 // --- 3. API ENDPOINTS ---
+
+// Check Webhook Status
+app.get('/api/webhook-status', async (req, res) => {
+  try {
+    const info = await client.getWebhookEndpointInfo();
+    res.json(info);
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Auto-Configure Webhook
+app.post('/api/set-webhook', async (req, res) => {
+  try {
+    // Auto-detect the full URL of this server
+    const protocol = req.protocol; 
+    const host = req.get('host');
+    const fullUrl = \`\${protocol}://\${host}\`;
+    const webhookUrl = \`\${fullUrl}/callback\`;
+
+    console.log(\`Setting webhook to: \${webhookUrl}\`);
+    await client.setWebhookEndpointUrl(webhookUrl);
+    res.json({ success: true, url: webhookUrl });
+  } catch (e) {
+    console.error("Webhook Config Error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // Push Message (For Live Chat)
 app.post('/api/push', async (req, res) => {
@@ -66,20 +98,6 @@ app.post('/api/push', async (req, res) => {
   } catch(e) {
      console.error("Push Error:", e);
      res.status(500).json({ error: e.message });
-  }
-});
-
-// Auto-Configure Webhook
-app.post('/api/set-webhook', async (req, res) => {
-  try {
-    const currentUrl = req.get('origin') || req.protocol + '://' + req.get('host');
-    const webhookUrl = \`\${currentUrl}/callback\`;
-    console.log(\`Setting webhook to: \${webhookUrl}\`);
-    await client.setWebhookEndpointUrl(webhookUrl);
-    res.json({ success: true, url: webhookUrl });
-  } catch (e) {
-    console.error("Webhook Config Error:", e);
-    res.status(500).json({ error: e.message });
   }
 });
 
@@ -196,13 +214,14 @@ app.listen(PORT, () => {
   }
 }`;
 
-  const handleCopy = (text: string) => {
+  const handleCopy = (text: string, fieldName: string) => {
     navigator.clipboard.writeText(text);
-    alert('Code copied to clipboard!');
+    setCopiedField(fieldName);
+    setTimeout(() => setCopiedField(null), 2000);
   };
 
   return (
-    <div className="max-w-5xl mx-auto p-6 pb-24">
+    <div className="max-w-6xl mx-auto p-6 pb-24">
       <div className="mb-8">
         <div className="flex items-center gap-3 mb-2">
           <div className="bg-indigo-100 p-2 rounded-lg">
@@ -211,13 +230,16 @@ app.listen(PORT, () => {
           <h1 className="text-2xl font-bold text-slate-800">Unified Deployment</h1>
         </div>
         <p className="text-slate-600 max-w-3xl leading-relaxed">
-          Host your <strong>LINE Bot</strong> and <strong>Admin Panel</strong> together on Render.
+          Follow these steps to host your <strong>LINE Bot</strong> and <strong>Admin Panel</strong> together on Render.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+         
+         {/* Code View Column */}
          <div className="lg:col-span-2 space-y-6">
-            {/* Tabs */}
+            
+            {/* File Switcher */}
             <div className="flex border-b border-slate-200">
               <button 
                 onClick={() => setActiveTab('server')}
@@ -246,10 +268,11 @@ app.listen(PORT, () => {
                   </span>
                 </div>
                 <button 
-                  onClick={() => handleCopy(activeTab === 'server' ? nodeCode : packageJsonCode)}
+                  onClick={() => handleCopy(activeTab === 'server' ? nodeCode : packageJsonCode, 'code')}
                   className="flex items-center gap-2 px-3 py-1.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-500 transition-colors text-xs font-medium"
                 >
-                  <Copy className="w-3 h-3" /> Copy
+                  {copiedField === 'code' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                  {copiedField === 'code' ? 'Copied' : 'Copy'}
                 </button>
               </div>
               <div className="p-4 overflow-x-auto max-h-[500px] custom-scrollbar">
@@ -260,46 +283,84 @@ app.listen(PORT, () => {
             </div>
          </div>
 
+         {/* Configuration Column */}
          <div className="space-y-6">
-             <div className="bg-indigo-900 text-white p-5 rounded-xl shadow-lg relative overflow-hidden">
-                <div className="absolute top-0 right-0 p-4 opacity-10">
-                  <Terminal className="w-24 h-24" />
-                </div>
-                <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
-                  <Terminal className="w-5 h-5" /> Quick Commands
+             
+             {/* Render Settings Box */}
+             <div className="bg-white p-6 rounded-xl border-2 border-indigo-100 shadow-sm">
+                 <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2 text-lg">
+                   <Globe className="w-5 h-5 text-indigo-600" /> Render Configuration
+                 </h3>
+                 
+                 <div className="space-y-4">
+                   <div>
+                     <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Build Command</label>
+                     <div className="flex items-center gap-2">
+                       <code className="flex-1 bg-slate-100 px-3 py-2 rounded text-sm border border-slate-200 font-mono text-slate-700 overflow-hidden text-ellipsis whitespace-nowrap">
+                         npm install && npm run build
+                       </code>
+                       <button 
+                          onClick={() => handleCopy("npm install && npm run build", "buildCmd")}
+                          className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
+                          title="Copy Build Command"
+                       >
+                         {copiedField === 'buildCmd' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                       </button>
+                     </div>
+                   </div>
+
+                   <div>
+                     <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Start Command</label>
+                     <div className="flex items-center gap-2">
+                       <code className="flex-1 bg-slate-100 px-3 py-2 rounded text-sm border border-slate-200 font-mono text-slate-700 font-bold">
+                         node server.js
+                       </code>
+                       <button 
+                          onClick={() => handleCopy("node server.js", "startCmd")}
+                          className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
+                          title="Copy Start Command"
+                       >
+                         {copiedField === 'startCmd' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                       </button>
+                     </div>
+                   </div>
+
+                   <div className="bg-amber-50 p-3 rounded-lg border border-amber-100">
+                      <p className="text-xs text-amber-800 flex items-start gap-2">
+                        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                        Don't forget to add your Environment Variables (API Keys) in the Render Dashboard!
+                      </p>
+                   </div>
+                 </div>
+             </div>
+
+             {/* Terminal Commands Box */}
+             <div className="bg-slate-900 text-slate-300 p-6 rounded-xl shadow-lg">
+                <h3 className="font-bold text-white mb-4 flex items-center gap-2">
+                  <Terminal className="w-5 h-5" /> Local Setup (Terminal)
                 </h3>
                 <div className="space-y-4">
                   <div>
-                    <p className="text-xs text-indigo-200 uppercase font-semibold mb-1">1. Install Deps</p>
-                    <div className="bg-black/30 p-2 rounded text-xs font-mono select-all">
+                    <p className="text-xs text-indigo-300 uppercase font-semibold mb-1">1. Install Dependencies</p>
+                    <div className="bg-black/50 p-2 rounded text-xs font-mono select-all text-slate-300 border border-slate-700">
                       npm install express @line/bot-sdk @google/genai @supabase/supabase-js dotenv cors
                     </div>
                   </div>
                   <div>
-                    <p className="text-xs text-indigo-200 uppercase font-semibold mb-1">2. Build Frontend</p>
-                    <div className="bg-black/30 p-2 rounded text-xs font-mono select-all">
+                    <p className="text-xs text-indigo-300 uppercase font-semibold mb-1">2. Build Frontend</p>
+                    <div className="bg-black/50 p-2 rounded text-xs font-mono select-all text-slate-300 border border-slate-700">
                       npm run build
                     </div>
                   </div>
                   <div>
-                    <p className="text-xs text-indigo-200 uppercase font-semibold mb-1">3. Run Server</p>
-                    <div className="bg-black/30 p-2 rounded text-xs font-mono select-all">
+                    <p className="text-xs text-indigo-300 uppercase font-semibold mb-1">3. Run Locally</p>
+                    <div className="bg-black/50 p-2 rounded text-xs font-mono select-all text-slate-300 border border-slate-700">
                       node server.js
                     </div>
                   </div>
                 </div>
              </div>
 
-             <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                 <h3 className="font-bold text-slate-800 mb-3 flex items-center gap-2">
-                   <Globe className="w-5 h-5 text-indigo-600" /> Render Config
-                 </h3>
-                 <ul className="text-sm text-slate-600 space-y-2 list-disc list-inside">
-                   <li><strong>Build Command:</strong> <code>npm install && npm run build</code></li>
-                   <li><strong>Start Command:</strong> <code>node server.js</code></li>
-                   <li><strong>Env Vars:</strong> Add keys from Settings tab.</li>
-                 </ul>
-             </div>
          </div>
       </div>
     </div>

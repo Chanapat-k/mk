@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { AppSettings } from '../types';
-import { Save, Database, Key, Bot, Terminal, MessageCircle, Radio, CheckCircle, XCircle, Zap } from 'lucide-react';
+import { Save, Database, Key, Bot, Terminal, MessageCircle, Radio, CheckCircle, XCircle, Zap, Link as LinkIcon } from 'lucide-react';
 import { initSupabase, checkConnection } from '../services/supabaseClient';
 
 interface SettingsProps {
@@ -13,9 +13,12 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
   const [formData, setFormData] = useState<AppSettings>(settings);
   const [connectionStatus, setConnectionStatus] = useState<'unknown' | 'success' | 'failed'>('unknown');
   const [webhookStatus, setWebhookStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [currentWebhookUrl, setCurrentWebhookUrl] = useState<string>('');
+  const [isWebhookCorrect, setIsWebhookCorrect] = useState<boolean | null>(null);
 
   useEffect(() => {
     setFormData(settings);
+    checkWebhookStatus();
   }, [settings]);
 
   const handleChange = (field: keyof AppSettings, value: string) => {
@@ -33,12 +36,29 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
     }
   };
 
+  const checkWebhookStatus = async () => {
+    try {
+      const res = await fetch('/api/webhook-status');
+      if (res.ok) {
+        const data = await res.json();
+        setCurrentWebhookUrl(data.endpointUrl);
+        
+        // Check if it matches our current origin
+        const expected = `${window.location.origin}/callback`;
+        setIsWebhookCorrect(data.endpointUrl === expected);
+      }
+    } catch (e) {
+      // Probably running locally or not on the unified server
+    }
+  };
+
   const handleAutoWebhook = async () => {
     setWebhookStatus('loading');
     try {
       const res = await fetch('/api/set-webhook', { method: 'POST' });
       if (res.ok) {
         setWebhookStatus('success');
+        checkWebhookStatus(); // Re-check after setting
         alert("Webhook successfully linked to this server!");
       } else {
         setWebhookStatus('error');
@@ -146,25 +166,30 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
             </div>
             
             {/* Auto Config Button */}
-            <div className="col-span-2 bg-indigo-50 p-4 rounded-lg border border-indigo-100 flex items-center justify-between">
+            <div className={`col-span-2 p-4 rounded-lg border flex items-center justify-between ${isWebhookCorrect === false ? 'bg-red-50 border-red-200' : 'bg-indigo-50 border-indigo-100'}`}>
               <div>
-                <h4 className="text-indigo-900 font-medium flex items-center gap-2">
-                  <Zap className="w-4 h-4" /> Auto-Connect
+                <h4 className={`font-medium flex items-center gap-2 ${isWebhookCorrect === false ? 'text-red-800' : 'text-indigo-900'}`}>
+                  <Zap className="w-4 h-4" /> 
+                  {isWebhookCorrect === false ? 'Webhook Mismatch Detected' : 'Automatic Connection'}
                 </h4>
-                <p className="text-indigo-700 text-sm mt-1">
-                  Once deployed, click this to automatically set the Webhook URL in LINE.
+                <p className={`text-sm mt-1 ${isWebhookCorrect === false ? 'text-red-700' : 'text-indigo-700'}`}>
+                  {isWebhookCorrect === false 
+                    ? `Current LINE Webhook: ${currentWebhookUrl || 'None'}. Expected: ${window.location.origin}/callback` 
+                    : "Sync your bot's webhook URL with this server automatically."}
                 </p>
               </div>
               <button 
                 onClick={handleAutoWebhook}
                 disabled={webhookStatus === 'loading'}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  webhookStatus === 'success' 
+                  webhookStatus === 'success' || isWebhookCorrect
                     ? 'bg-green-600 text-white' 
-                    : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                    : isWebhookCorrect === false
+                      ? 'bg-red-600 text-white hover:bg-red-700'
+                      : 'bg-indigo-600 text-white hover:bg-indigo-700'
                 }`}
               >
-                {webhookStatus === 'loading' ? 'Connecting...' : webhookStatus === 'success' ? 'Connected!' : 'Set Webhook URL'}
+                {webhookStatus === 'loading' ? 'Connecting...' : isWebhookCorrect ? 'Connected & Active' : 'Fix Webhook URL'}
               </button>
             </div>
           </div>
