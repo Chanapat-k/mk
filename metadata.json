@@ -1,0 +1,5 @@
+{
+  "name": "LINE Bot Admin & Brain",
+  "description": "A React-based admin panel to configure a Gemini-powered AI, simulate LINE chat interactions, and persist conversation history to Supabase.",
+  "requestFramePermissions": []
+}
